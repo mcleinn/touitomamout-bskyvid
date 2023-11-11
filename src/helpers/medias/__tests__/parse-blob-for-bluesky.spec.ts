@@ -22,7 +22,6 @@ describe("parseBlobForBluesky", () => {
       ${"image/webp"}
     `("should reject for $mimeType", async ({ mimeType }) => {
       await initBlobsForMime(mimeType);
-
       await expect(parseBlobForBluesky(imageBlob)).rejects.toContain(
         "not supported",
       );

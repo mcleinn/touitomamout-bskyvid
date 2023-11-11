@@ -1,4 +1,5 @@
 import bsky, { BskyAgent } from "@atproto/api";
+import { Video } from "@the-convocation/twitter-scraper/dist/tweets.js";
 import { Ora } from "ora";
 
 import { DEBUG, VOID } from "../constants.js";
@@ -7,6 +8,7 @@ import { savePostToCache } from "../helpers/cache/save-post-to-cache.js";
 import { oraProgress } from "../helpers/logs/index.js";
 import { parseBlobForBluesky } from "../helpers/medias/parse-blob-for-bluesky.js";
 import { getPostExcerpt } from "../helpers/post/get-post-excerpt.js";
+import { BlueskyCard } from "../types/card.js";
 import {
   BlueskyCacheChunk,
   BlueskyMediaAttachment,
@@ -33,6 +35,8 @@ export const blueskySenderService = async (
 
   // Medias
   const mediaAttachments: BlueskyMediaAttachment[] = [];
+  let card: BlueskyCard | null = null;
+
   for (const media of medias) {
     if (!media.url) {
       continue;
@@ -51,7 +55,17 @@ export const blueskySenderService = async (
         continue;
       }
 
-      const blueskyBlob = await parseBlobForBluesky(mediaBlob).catch((err) => {
+      const video = media as Video;
+      const previewBlob =
+        video && video.preview
+          ? await mediaDownloaderService(video.preview)
+          : null;
+
+      const blueskyBlob = await parseBlobForBluesky(
+        mediaBlob,
+        previewBlob,
+        media,
+      ).catch((err) => {
         if (DEBUG) {
           console.log(err);
         }
@@ -67,6 +81,8 @@ export const blueskySenderService = async (
         continue;
       }
 
+      card = blueskyBlob.card;
+
       // Upload
       log.text = `medias: ↑ (${mediaAttachments.length + 1}/${
         medias.length
@@ -78,6 +94,9 @@ export const blueskySenderService = async (
           const m: BlueskyMediaAttachment = { ...mediaSent };
           if (media.type === "image" && media.alt_text) {
             m.alt_text = media.alt_text;
+          }
+          if (card) {
+            card.thumb = { ...mediaSent };
           }
           mediaAttachments.push(m);
         })
@@ -142,9 +161,26 @@ export const blueskySenderService = async (
           }
         : {};
 
+      const external = card
+        ? {
+            external: {
+              $type: "app.bsky.embed.external",
+              uri: card.uri,
+              title: card.title,
+              description: card.description,
+              thumb: card.thumb?.data.blob.original,
+            },
+          }
+        : {};
+
       let embed = {};
 
-      if (Object.keys(quoteRecord).length) {
+      if (Object.keys(external).length) {
+        embed = {
+          ...external,
+          $type: "app.bsky.embed.external",
+        };
+      } else if (Object.keys(quoteRecord).length) {
         embed = {
           ...quoteRecord,
           $type: "app.bsky.embed.record",
