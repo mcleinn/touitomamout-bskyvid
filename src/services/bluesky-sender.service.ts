@@ -1,6 +1,6 @@
 import bsky, { BskyAgent } from "@atproto/api";
 import { Link } from "@atproto/api/dist/client/types/app/bsky/richtext/facet.js";
-import { Photo, Video } from "@the-convocation/twitter-scraper/dist/tweets.js";
+import { Video } from "@the-convocation/twitter-scraper/dist/tweets.js";
 import { Ora } from "ora";
 
 import { DEBUG, VOID } from "../constants.js";
@@ -64,29 +64,35 @@ export const blueskySenderService = async (
   }
 
   let card: BlueskyCard | null = null;
-  for (const chunk of post.chunks) {
-    const richText = new bsky.RichText({ text: chunk });
-    await richText.detectFacets(client);
-    if (!richText.facets) continue;
+  if (medias.length === 0) {
+    // create preview card based on first link only when there are no image or video attachments
+    // image posts do not need cards, and videos create their own preview card in parse-blob-for-bluesky
+    for (const chunk of post.chunks) {
+      const richText = new bsky.RichText({ text: chunk });
+      await richText.detectFacets(client);
+      if (!richText.facets) continue;
 
-    const firstMainWithLink = findFirstLink(
-      richText.facets as bsky.AppBskyRichtextFacet.Main[],
-    );
-    if (!firstMainWithLink?.uri) continue;
-    const ogTags = await scrapeOpenGraphTags(firstMainWithLink?.uri);
-    card = {
-      uri: firstMainWithLink?.uri,
-      title: ogTags.title || "",
-      description: ogTags.description || "",
-      thumb: null,
-    };
-    if (ogTags.image)
-      medias.unshift({ type: "image", url: ogTags.image } as Media);
+      const firstMainWithLink = findFirstLink(
+        richText.facets as bsky.AppBskyRichtextFacet.Main[],
+      );
+      if (!firstMainWithLink?.uri) continue;
+      const ogTags = await scrapeOpenGraphTags(firstMainWithLink?.uri);
+      card = {
+        uri: firstMainWithLink?.uri,
+        title: ogTags.title || "",
+        description: ogTags.description || "",
+        thumb: null,
+      };
+      // insert preview image to medias
+      if (ogTags.image)
+        medias.unshift({ type: "image", url: ogTags.image } as Media);
 
-    break;
+      break;
+    }
+
+    // remove link from post text to save post length
+    if (card?.uri) post.chunks = removeUri(post.chunks, card?.uri);
   }
-
-  if (card?.uri) post.chunks = removeUri(post.chunks, card?.uri);
 
   // Medias
   const mediaAttachments: BlueskyMediaAttachment[] = [];
@@ -286,44 +292,53 @@ export const blueskySenderService = async (
     log.text = `☁️ | post sending: ${getPostExcerpt(post.tweet.text ?? VOID)}`;
 
     // Post
-    await client.post({ ...data }).then(async (createdPost) => {
-      oraProgress(
-        log,
-        { before: "☁️ | post sending: " },
-        chunkIndex,
-        post.chunks.length,
-      );
-
-      // Save post ID to be able to reference it while posting the next chunk.
-      chunkReferences.push({
-        cid: createdPost.cid,
-        uri: createdPost.uri,
-        rkey: createdPost.uri.match(/\/(?<rkey>\w+)$/)?.groups?.["rkey"] || "",
-      });
-
-      // If this is the last chunk, save the all chunks ID to the cache.
-      if (chunkIndex === post.chunks.length - 1) {
-        log.succeed(
-          `☁️ | post sent: ${getPostExcerpt(post.tweet.text ?? VOID)}${
-            chunkReferences.length > 1
-              ? ` (${chunkReferences.length} chunks)`
-              : ""
-          }`,
+    await client
+      .post({ ...data })
+      .then(async (createdPost) => {
+        oraProgress(
+          log,
+          { before: "☁️ | post sending: " },
+          chunkIndex,
+          post.chunks.length,
         );
 
-        const cache = await getCachedPosts();
-        await savePostToCache({
-          cache,
-          tweetId: post.tweet.id,
-          data: chunkReferences.map((ref) => ({
-            rkey: ref.rkey,
-            cid: ref.cid,
-          })),
-          platform: Platform.BLUESKY,
+        // Save post ID to be able to reference it while posting the next chunk.
+        chunkReferences.push({
+          cid: createdPost.cid,
+          uri: createdPost.uri,
+          rkey:
+            createdPost.uri.match(/\/(?<rkey>\w+)$/)?.groups?.["rkey"] || "",
         });
-      }
 
-      chunkIndex++;
-    });
+        // If this is the last chunk, save the all chunks ID to the cache.
+        if (chunkIndex === post.chunks.length - 1) {
+          log.succeed(
+            `☁️ | post sent: ${getPostExcerpt(post.tweet.text ?? VOID)}${
+              chunkReferences.length > 1
+                ? ` (${chunkReferences.length} chunks)`
+                : ""
+            }`,
+          );
+
+          const cache = await getCachedPosts();
+          await savePostToCache({
+            cache,
+            tweetId: post.tweet.id,
+            data: chunkReferences.map((ref) => ({
+              rkey: ref.rkey,
+              cid: ref.cid,
+            })),
+            platform: Platform.BLUESKY,
+          });
+        }
+
+        chunkIndex++;
+      })
+      .catch((error) => {
+        // Handle the error
+        console.error("Error sending post:", error);
+        console.error("Created at: ", data.createdAt);
+        console.error("Text: ", data.text);
+      });
   }
 };

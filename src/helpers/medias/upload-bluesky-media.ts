@@ -7,10 +7,10 @@ import { parseBlobForBluesky } from "./parse-blob-for-bluesky.js";
  * An async method to upload a media to Bluesky.
  * @returns the bluesky media references
  */
-export const uploadBlueskyMedia = async (
+export async function uploadBlueskyMedia(
   mediaBlob: Blob,
   blueskyClient: BskyAgent | null,
-) => {
+) {
   if (!blueskyClient) {
     return null;
   }
@@ -27,4 +27,4 @@ export const uploadBlueskyMedia = async (
       }
       return null;
     });
-};
+}

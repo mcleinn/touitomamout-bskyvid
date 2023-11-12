@@ -53,7 +53,8 @@ export const makeBlueskyPost = async (
       : undefined;
   }
 
-  const post = new bsky.RichText({ text: tweet.text! });
+  const cleanedText = tweet.text!.replace("&amp;", "&");
+  const post = new bsky.RichText({ text: cleanedText });
   await post.detectFacets(client); // automatically detects mentions and links
 
   return {
