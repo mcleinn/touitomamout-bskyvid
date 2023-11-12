@@ -30,11 +30,13 @@
     "@pm2/io": "^5.0.2",
     "@the-convocation/twitter-scraper": "^0.8.1",
     "@types/node": "^20.8.10",
+    "cheerio": "^1.0.0-rc.12",
     "cli-spinners": "^2.9.1",
     "dotenv": "^16.3.1",
     "html-escaper": "^3.0.3",
     "masto": "^6.4.1",
     "mime": "^3.0.0",
+    "node-fetch": "^3.3.2",
     "node-html-parser": "^6.1.11",
     "ora": "^7.0.1",
     "tough-cookie": "^4.1.3"

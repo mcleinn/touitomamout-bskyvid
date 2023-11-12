@@ -29,7 +29,7 @@ export const parseBlobForBluesky = async (
         const video = media as Video;
         const videoCard = {
           uri: video.url as string,
-          title: "⏵Video",
+          title: "⏵ Video",
           description: "",
           thumb: null,
         };

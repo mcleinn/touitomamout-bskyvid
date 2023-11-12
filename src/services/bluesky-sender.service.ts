@@ -1,8 +1,10 @@
 import bsky, { BskyAgent } from "@atproto/api";
-import { Video } from "@the-convocation/twitter-scraper/dist/tweets.js";
+import { Link } from "@atproto/api/dist/client/types/app/bsky/richtext/facet.js";
+import { Photo, Video } from "@the-convocation/twitter-scraper/dist/tweets.js";
 import { Ora } from "ora";
 
 import { DEBUG, VOID } from "../constants.js";
+import { scrapeOpenGraphTags } from "../helpers/bluesky/og-scraper.js";
 import { getCachedPosts } from "../helpers/cache/get-cached-posts.js";
 import { savePostToCache } from "../helpers/cache/save-post-to-cache.js";
 import { oraProgress } from "../helpers/logs/index.js";
@@ -33,10 +35,61 @@ export const blueskySenderService = async (
     return;
   }
 
+  // Detect links
+  const findFirstLink = (
+    mains: bsky.AppBskyRichtextFacet.Main[],
+  ): Link | undefined => {
+    for (const main of mains) {
+      const linkFeature = main.features.find(
+        (feature) => "uri" in feature,
+      ) as Link;
+      if (linkFeature) {
+        return linkFeature; // This will return the first Link object found
+      }
+    }
+    return undefined;
+  };
+
+  function removeUri(strings: string[], substring: string): string[] {
+    const index = strings.findIndex((str) => str.includes(substring));
+
+    if (index !== -1) {
+      strings[index] = strings[index].replace(substring, "");
+      if (strings[index] === "") {
+        strings.splice(index, 1);
+      }
+    }
+
+    return strings;
+  }
+
+  let card: BlueskyCard | null = null;
+  for (const chunk of post.chunks) {
+    const richText = new bsky.RichText({ text: chunk });
+    await richText.detectFacets(client);
+    if (!richText.facets) continue;
+
+    const firstMainWithLink = findFirstLink(
+      richText.facets as bsky.AppBskyRichtextFacet.Main[],
+    );
+    if (!firstMainWithLink?.uri) continue;
+    const ogTags = await scrapeOpenGraphTags(firstMainWithLink?.uri);
+    card = {
+      uri: firstMainWithLink?.uri,
+      title: ogTags.title || "",
+      description: ogTags.description || "",
+      thumb: null,
+    };
+    if (ogTags.image)
+      medias.unshift({ type: "image", url: ogTags.image } as Media);
+
+    break;
+  }
+
+  if (card?.uri) post.chunks = removeUri(post.chunks, card?.uri);
+
   // Medias
   const mediaAttachments: BlueskyMediaAttachment[] = [];
-  let card: BlueskyCard | null = null;
-
   for (const media of medias) {
     if (!media.url) {
       continue;
@@ -81,7 +134,7 @@ export const blueskySenderService = async (
         continue;
       }
 
-      card = blueskyBlob.card;
+      if (blueskyBlob.card) card = blueskyBlob.card;
 
       // Upload
       log.text = `medias: ↑ (${mediaAttachments.length + 1}/${
